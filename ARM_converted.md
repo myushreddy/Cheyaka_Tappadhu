@@ -145,7 +145,7 @@ All these adversarial attacks provided above result in:
 
 ## 4. Proposed Method
 
-![Figure 1: Workflow of the proposed mechanism](image-placeholder)
+![Figure 1: Workflow of the proposed mechanism](images/workflow.png)
 
 Figure 1 shows the workflow of the proposed method. After extracting the API calls and permissions from the Android applications, the proposed method combines Mutual Information (MI) and the GA-RAM to detect general, adversarial and zero-day malware by addressing their characteristic feature perturbations. MI identifies an initial feature set by evaluating the mutual information between Android application features, such as APIs and permissions, and their corresponding labels (benign or malicious). GA-RAM then refines this set using evolutionary principles to generate an optimized subset that effectively detects adversarial perturbations.
 
