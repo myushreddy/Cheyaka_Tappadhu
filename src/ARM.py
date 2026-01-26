@@ -129,7 +129,7 @@ population_size = 10           # Small for test
 generations = 5                # Testing only
 mutation_rate = 0.2            
 
-# Initialize population (Random binary masks)
+
 population = np.random.randint(0, 2, size=(population_size, n_features))
 
 print(f"GA-RAM initialized with shape: {population.shape}")
