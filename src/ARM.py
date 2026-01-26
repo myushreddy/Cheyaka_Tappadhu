@@ -6,11 +6,18 @@ from sklearn.feature_selection import mutual_info_classif
 # ==========================================
 # 1. SETUP & PATHS
 # ==========================================
-# We define the base directory so we don't have to type it every time
-BASE_DIR = r"D:\ARM"
-INPUT_FILE = os.path.join(BASE_DIR, "data_sample_25k.csv")
+# Get project root directory (one level up from src/)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
-print(f"Working Directory: {BASE_DIR}")
+# Ensure data directory exists
+os.makedirs(DATA_DIR, exist_ok=True)
+
+INPUT_FILE = os.path.join(DATA_DIR, "data_sample_25k.csv")
+
+print(f"Project Root: {PROJECT_ROOT}")
+print(f"Data Directory: {DATA_DIR}")
 
 # Check if input file exists
 if not os.path.exists(INPUT_FILE):
@@ -57,7 +64,7 @@ unique_vals = np.unique(X.values)
 print("Unique values in X:", unique_vals)
 
 # Save Cleaned Features locally
-x_save_path = os.path.join(BASE_DIR, "X_features_clean.csv")
+x_save_path = os.path.join(DATA_DIR, "X_features_clean.csv")
 X.to_csv(x_save_path, index=False)
 print(f" Saved clean features to: {x_save_path}")
 
@@ -68,7 +75,7 @@ print(f" Saved clean features to: {x_save_path}")
 # NOTE: In a real run, you would extract real labels here.
 y = pd.Series([-1] * len(X), name="label")
 
-y_save_path = os.path.join(BASE_DIR, "y_labels_placeholder.csv")
+y_save_path = os.path.join(DATA_DIR, "y_labels_placeholder.csv")
 y.to_csv(y_save_path, index=False)
 print(f" Saved placeholder labels to: {y_save_path}")
 
@@ -78,7 +85,7 @@ print(f" Saved placeholder labels to: {y_save_path}")
 # Combine features + placeholder labels into one dataframe
 df_full = pd.concat([X, y], axis=1)
 
-full_save_path = os.path.join(BASE_DIR, "XY_placeholder.csv")
+full_save_path = os.path.join(DATA_DIR, "XY_placeholder.csv")
 df_full.to_csv(full_save_path, index=False)
 
 print(f" Combined dataset saved to: {full_save_path}")
@@ -112,7 +119,7 @@ mi_df = pd.DataFrame({
 # Sort descending
 mi_df = mi_df.sort_values(by='MI_score', ascending=False)
 
-mi_save_path = os.path.join(BASE_DIR, "MI_scores_result.csv")
+mi_save_path = os.path.join(DATA_DIR, "MI_scores_result.csv")
 mi_df.to_csv(mi_save_path, index=False)
 
 print(f" MI scores saved to: {mi_save_path}")
@@ -135,5 +142,3 @@ population = np.random.randint(0, 2, size=(population_size, n_features))
 print(f"GA-RAM initialized with shape: {population.shape}")
 print("First individual (binary mask):")
 print(population[0])
-
-print("\n SCRIPT FINISHED SUCCESSFULLY!")
