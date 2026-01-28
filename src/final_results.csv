@@ -1,0 +1,5 @@
+Metric,Value
+Source Dataset,data_sample_25k.csv
+Total Samples,"25,000"
+Baseline Accuracy,98.24%
+Final Accuracy,100.00%
