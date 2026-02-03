@@ -18,6 +18,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
                              f1_score, classification_report, confusion_matrix)
 import warnings
+import time
 warnings.filterwarnings('ignore')
 
 
@@ -66,7 +67,7 @@ class GARAMChromosome:
         # No crossover occurred, return parents
         return self, other
     
-    def mutate_ram(self, population_size, base_rate=0.01, alpha=2.0):
+    def mutate_ram(self, population_size, base_rate=0.01, alpha=2.0, effective_rank=None):
         """
         RANK-BASED ADAPTIVE MUTATION (RAM)
         
@@ -80,9 +81,15 @@ class GARAMChromosome:
             population_size: Size of population (for normalization)
             base_rate: Base mutation probability
             alpha: Adaptation strength (higher = more aggressive adaptation)
+            effective_rank: Rank value to use for mutation (if None, uses self.rank)
         """
+        # If no explicit rank is provided (e.g., for existing population),
+        # fall back to the chromosome's own rank.
+        if effective_rank is None:
+            effective_rank = self.rank
+
         # Normalize rank: 0 (worst) to 1 (best)
-        normalized_rank = self.rank / population_size
+        normalized_rank = effective_rank / population_size
         
         # Calculate adaptive mutation rate
         # High rank (good) → low mutation
@@ -105,7 +112,8 @@ class GARAMChromosome:
 # 2. FITNESS FUNCTION
 # ============================================================================
 
-def calculate_fitness_ram(chromosome, X_train, y_train, X_val, y_val):
+def calculate_fitness_ram(chromosome, X_train, y_train, X_val, y_val, 
+                          fast_mode=True, sample_size=5000, sample_indices=None):
     """
     Calculate fitness for GA-RAM
     
@@ -114,6 +122,13 @@ def calculate_fitness_ram(chromosome, X_train, y_train, X_val, y_val):
     Components:
     1. Accuracy: Classification performance on validation set
     2. Feature Reduction: Penalty for using too many features
+    
+    Args:
+        fast_mode: If True, use fewer estimators and sample data for faster evaluation
+        sample_size: Number of samples to use for training in fast_mode
+        sample_indices: Optional precomputed indices for training subset. When
+                        provided, ALL chromosomes in a generation share the
+                        same subset, ensuring fair fitness comparison.
     
     Returns: fitness score between 0 and 1
     """
@@ -128,17 +143,37 @@ def calculate_fitness_ram(chromosome, X_train, y_train, X_val, y_val):
         X_train_selected = X_train[:, selected_features]
         X_val_selected = X_val[:, selected_features]
         
-        # Train Random Forest classifier
+        # For faster evaluation, use a shared sample of training data.
+        # To keep fitness comparable across chromosomes within the same
+        # generation, sampling indices should be precomputed once per
+        # generation and passed via `sample_indices`.
+        if fast_mode and sample_indices is not None:
+            X_train_subset = X_train_selected[sample_indices]
+            y_train_subset = y_train[sample_indices]
+        elif fast_mode and len(y_train) > sample_size:
+            # Fallback path if no indices are provided; this should normally
+            # not be used by the GA loop, but keeps the function robust.
+            indices = np.random.choice(len(y_train), sample_size, replace=False)
+            X_train_subset = X_train_selected[indices]
+            y_train_subset = y_train[indices]
+        else:
+            X_train_subset = X_train_selected
+            y_train_subset = y_train
+        
+        # Train Random Forest classifier with optimized parameters for speed
+        n_estimators = 20 if fast_mode else 100  # Fewer trees for faster evaluation
+        max_depth = 10 if fast_mode else 15
+        
         rf = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=15,
+            n_estimators=n_estimators,
+            max_depth=max_depth,
             random_state=42,
             n_jobs=-1,
             min_samples_split=5,
             min_samples_leaf=2
         )
         
-        rf.fit(X_train_selected, y_train)
+        rf.fit(X_train_subset, y_train_subset)
         
         # Evaluate on validation set
         y_pred = rf.predict(X_val_selected)
@@ -205,14 +240,28 @@ class GARAM:
                           for _ in range(self.population_size)]
         print(f"✓ Initialized population of {self.population_size} chromosomes")
     
-    def evaluate_population(self, X_train, y_train, X_val, y_val):
+    def evaluate_population(self, X_train, y_train, X_val, y_val, 
+                            fast_mode=True, sample_size=5000):
         """
         Evaluate fitness for all chromosomes
-        Updates best chromosome if better solution found
+        Updates best chromosome if better solution found.
+
+        To ensure fair comparison across chromosomes in the SAME generation
+        when `fast_mode=True`, we precompute a single subset of training
+        indices and reuse it for every chromosome.
         """
-        for chromosome in self.population:
+        # Precompute a shared subset of training indices (if using fast mode)
+        if fast_mode and len(y_train) > sample_size:
+            sample_indices = np.random.choice(len(y_train), sample_size, replace=False)
+        else:
+            sample_indices = None
+
+        for idx, chromosome in enumerate(self.population):
             chromosome.fitness = calculate_fitness_ram(
-                chromosome, X_train, y_train, X_val, y_val
+                chromosome, X_train, y_train, X_val, y_val,
+                fast_mode=fast_mode,
+                sample_size=sample_size,
+                sample_indices=sample_indices,
             )
             
             # Track best chromosome across all generations
@@ -221,6 +270,10 @@ class GARAM:
                 self.best_chromosome = GARAMChromosome(self.n_features)
                 self.best_chromosome.genes = chromosome.genes.copy()
                 self.best_chromosome.fitness = chromosome.fitness
+            
+            # Progress indicator
+            if (idx + 1) % 10 == 0:
+                print(f"  Evaluated {idx + 1}/{len(self.population)} chromosomes...", end='\r')
     
     def rank_population(self):
         """
@@ -265,18 +318,31 @@ class GARAM:
         print(f"Base Mutation Rate: {self.base_mutation_rate}")
         print(f"Alpha (Adaptation): {self.alpha}")
         print(f"Tournament Size: {self.tournament_size}")
+        print(f"\n⚡ OPTIMIZATION MODE: Fast evaluation enabled")
+        print(f"   - Using 20 trees (instead of 100) for fitness evaluation")
+        print(f"   - Sampling 5,000 training samples per evaluation")
+        print(f"   - Final classifier will use full parameters")
         
         # Initialize population
         self.initialize_population()
         
         # Evolution loop
+        generation_start_time = time.time()
         for generation in range(self.n_generations):
+            gen_start = time.time()
             print(f"\n{'─'*70}")
             print(f"🔄 Generation {generation + 1}/{self.n_generations}")
             print(f"{'─'*70}")
             
-            # Step 1: Evaluate fitness
-            self.evaluate_population(X_train, y_train, X_val, y_val)
+            # Step 1: Evaluate fitness (use fast_mode=True for faster evaluation)
+            # NOTE: evaluate_population ensures that all chromosomes in this
+            # generation share the SAME training subset when fast_mode=True.
+            self.evaluate_population(
+                X_train, y_train, X_val, y_val,
+                fast_mode=True,
+                sample_size=5000,
+            )
+            print()  # New line after progress indicator
             
             # Step 2: Rank population (for adaptive mutation)
             self.rank_population()
@@ -316,19 +382,35 @@ class GARAM:
                 child1, child2 = parent1.crossover(parent2, crossover_rate=0.8)
                 
                 # Rank-based Adaptive Mutation
-                child1.mutate_ram(self.population_size, 
-                                 self.base_mutation_rate, 
-                                 self.alpha)
-                child2.mutate_ram(self.population_size, 
-                                 self.base_mutation_rate, 
-                                 self.alpha)
+                # Newborn children do not yet have meaningful ranks. To make
+                # RAM effective immediately, we derive an "effective rank"
+                # for each child from its parents (use the average rank).
+                parent_avg_rank = (parent1.rank + parent2.rank) / 2.0
+
+                child1.mutate_ram(
+                    self.population_size,
+                    self.base_mutation_rate,
+                    self.alpha,
+                    effective_rank=parent_avg_rank,
+                )
+                child2.mutate_ram(
+                    self.population_size,
+                    self.base_mutation_rate,
+                    self.alpha,
+                    effective_rank=parent_avg_rank,
+                )
                 
                 new_population.extend([child1, child2])
                 offspring_count += 2
             
             # Update population
             self.population = new_population[:self.population_size]
+            gen_time = time.time() - gen_start
+            elapsed_total = time.time() - generation_start_time
+            avg_time_per_gen = elapsed_total / (generation + 1)
+            estimated_remaining = avg_time_per_gen * (self.n_generations - generation - 1)
             print(f"✓ Preserved {elite_size} elite | Generated {offspring_count} offspring")
+            print(f"⏱️  Generation time: {gen_time:.1f}s | Est. remaining: {estimated_remaining/60:.1f} min")
         
         # Final summary
         print("\n" + "="*70)
@@ -426,10 +508,11 @@ def run_garam_pipeline(X_train, y_train, X_val, y_val, X_test, y_test):
     print("📍 PHASE 1: GA-RAM FEATURE SELECTION")
     print("="*70)
     
+    # Optimized parameters for faster execution with larger dataset
     garam = GARAM(
         n_features=n_features,
-        population_size=50,
-        n_generations=30,
+        population_size=30,  # Reduced from 50 for faster execution
+        n_generations=20,   # Reduced from 30 for faster execution
         base_mutation_rate=0.01,
         alpha=2.0,
         tournament_size=3
@@ -680,18 +763,22 @@ if __name__ == "__main__":
     print("="*70)
     
     # Load data
-
     print("\n📁 Loading data...")
-    data_path = Path(__file__).resolve().parent / 'data' / 'XY_final_dataset.csv'
+    data_path = Path(__file__).resolve().parent / 'data' / 'data_sample_25k.csv'
+    labels_path = Path(__file__).resolve().parent / 'data' / 'y_labels.csv'
+    
     if not data_path.exists():
         raise FileNotFoundError(f"Data file not found: {data_path}")
-    df = pd.read_csv(str(data_path))
-
-
+    if not labels_path.exists():
+        raise FileNotFoundError(f"Labels file not found: {labels_path}")
     
-    # Separate features and labels
-    X = df.iloc[:, :-1].values
-    y = df.iloc[:, -1].values
+    df = pd.read_csv(str(data_path))
+    df_labels = pd.read_csv(str(labels_path))
+    
+    # Skip first 3 columns (SHA256, NOME, PACOTE) - these are metadata
+    # Use columns 3 onwards as features
+    X = df.iloc[:, 3:].values
+    y = df_labels.iloc[:, 0].values
     
     # Labels are already 0 (benign) and 1 (malware) - no conversion needed
     
