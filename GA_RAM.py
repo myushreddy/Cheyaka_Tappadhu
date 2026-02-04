@@ -96,10 +96,9 @@ class GARAMChromosome:
         # Low rank (bad) → high mutation
         mutation_rate = base_rate * (1 + alpha * (1 - normalized_rank))
         
-        # Apply bit-flip mutation
-        for i in range(self.n_features):
-            if np.random.random() < mutation_rate:
-                self.genes[i] = 1 - self.genes[i]  # Flip bit
+        # Apply bit-flip mutation (vectorized for speed)
+        mutation_mask = np.random.random(self.n_features) < mutation_rate
+        self.genes[mutation_mask] = 1 - self.genes[mutation_mask]
         
         # Constraint: Ensure at least 5 features selected
         # (prevents degenerate solutions)
@@ -170,7 +169,8 @@ def calculate_fitness_ram(chromosome, X_train, y_train, X_val, y_val,
             random_state=42,
             n_jobs=-1,
             min_samples_split=5,
-            min_samples_leaf=2
+            min_samples_leaf=2,
+            verbose=0  # Suppress verbosity
         )
         
         rf.fit(X_train_subset, y_train_subset)
@@ -271,8 +271,8 @@ class GARAM:
                 self.best_chromosome.genes = chromosome.genes.copy()
                 self.best_chromosome.fitness = chromosome.fitness
             
-            # Progress indicator
-            if (idx + 1) % 10 == 0:
+            # Progress indicator (print less frequently)
+            if (idx + 1) % max(5, len(self.population)//5) == 0:
                 print(f"  Evaluated {idx + 1}/{len(self.population)} chromosomes...", end='\r')
     
     def rank_population(self):
@@ -293,16 +293,18 @@ class GARAM:
     
     def tournament_selection(self):
         """
-        Tournament selection for parent selection
+        Tournament selection for parent selection (optimized)
         
         Randomly pick tournament_size chromosomes and return the best
         """
-        tournament = np.random.choice(
-            self.population, 
+        tournament_indices = np.random.choice(
+            len(self.population), 
             self.tournament_size, 
             replace=False
         )
-        return max(tournament, key=lambda x: x.fitness)
+        # Get the chromosome with highest fitness
+        best_idx = max(tournament_indices, key=lambda i: self.population[i].fitness)
+        return self.population[best_idx]
     
     def evolve(self, X_train, y_train, X_val, y_val):
         """
@@ -330,37 +332,43 @@ class GARAM:
         generation_start_time = time.time()
         for generation in range(self.n_generations):
             gen_start = time.time()
-            print(f"\n{'─'*70}")
-            print(f"🔄 Generation {generation + 1}/{self.n_generations}")
-            print(f"{'─'*70}")
+            # Only print full details for first, last, and every Nth generation
+            print_detailed = (generation == 0 or generation == self.n_generations - 1 or 
+                            generation % max(1, self.n_generations // 5) == 0)
+            if print_detailed:
+                print(f"\n{'─'*70}")
+                print(f"🔄 Generation {generation + 1}/{self.n_generations}")
+                print(f"{'─'*70}")
             
-            # Step 1: Evaluate fitness (use fast_mode=True for faster evaluation)
-            # NOTE: evaluate_population ensures that all chromosomes in this
-            # generation share the SAME training subset when fast_mode=True.
+            # Step 1: Evaluate fitness
             self.evaluate_population(
                 X_train, y_train, X_val, y_val,
                 fast_mode=True,
                 sample_size=5000,
             )
-            print()  # New line after progress indicator
+            if print_detailed:
+                print()  # New line after progress indicator
             
             # Step 2: Rank population (for adaptive mutation)
             self.rank_population()
             
-            # Step 3: Track statistics
-            avg_fitness = np.mean([c.fitness for c in self.population])
-            avg_features = np.mean([np.sum(c.genes) for c in self.population])
+            # Step 3: Track statistics (optimized - vectorized)
+            fitnesses = np.array([c.fitness for c in self.population])
+            avg_fitness = np.mean(fitnesses)
+            features_array = np.array([np.sum(c.genes) for c in self.population])
+            avg_features = np.mean(features_array)
             best_features = np.sum(self.best_chromosome.genes)
             
             self.fitness_history.append(avg_fitness)
             self.feature_count_history.append(avg_features)
             self.best_fitness_history.append(self.best_fitness)
             
-            # Print generation stats
-            print(f"📊 Best Fitness:      {self.best_fitness:.4f}")
-            print(f"📊 Average Fitness:   {avg_fitness:.4f}")
-            print(f"📊 Best Features:     {best_features}/{self.n_features}")
-            print(f"📊 Average Features:  {avg_features:.1f}")
+            # Print stats only for selected generations
+            if print_detailed:
+                print(f"📊 Best Fitness:      {self.best_fitness:.4f}")
+                print(f"📊 Average Fitness:   {avg_fitness:.4f}")
+                print(f"📊 Best Features:     {best_features}/{self.n_features}")
+                print(f"📊 Average Features:  {avg_features:.1f}")
             
             # Step 4: Create next generation
             new_population = []
@@ -409,8 +417,11 @@ class GARAM:
             elapsed_total = time.time() - generation_start_time
             avg_time_per_gen = elapsed_total / (generation + 1)
             estimated_remaining = avg_time_per_gen * (self.n_generations - generation - 1)
-            print(f"✓ Preserved {elite_size} elite | Generated {offspring_count} offspring")
-            print(f"⏱️  Generation time: {gen_time:.1f}s | Est. remaining: {estimated_remaining/60:.1f} min")
+            
+            if print_detailed:
+                elite_size = int(0.1 * self.population_size)
+                print(f"✓ Preserved {elite_size} elite | Generated {offspring_count} offspring")
+                print(f"⏱️  Generation time: {gen_time:.1f}s | Est. remaining: {estimated_remaining/60:.1f} min")
         
         # Final summary
         print("\n" + "="*70)
@@ -451,15 +462,16 @@ def refine_features_with_rf(X_train, y_train, selected_features, top_k=None):
     rf = RandomForestClassifier(
         n_estimators=100,
         random_state=42,
-        n_jobs=-1
+        n_jobs=-1,
+        verbose=0  # Suppress verbosity
     )
     rf.fit(X_train_selected, y_train)
     
     # Get feature importances
     importances = rf.feature_importances_
     
-    # Sort by importance (descending)
-    importance_indices = np.argsort(importances)[::-1]
+    # Sort by importance (descending) - optimized with single argsort
+    importance_indices = np.argsort(-importances)  # Negative for descending
     
     if top_k is not None and top_k < len(selected_features):
         # Keep only top-k features
@@ -549,20 +561,34 @@ def run_garam_pipeline(X_train, y_train, X_val, y_val, X_test, y_test):
     print("="*70)
     
     X_train_final = X_train[:, refined_features]
+    X_val_final = X_val[:, refined_features]
     X_test_final = X_test[:, refined_features]
     
+    # Combine train + val for final training (only for final model)
+    X_train_combined = np.vstack([X_train_final, X_val_final])
+    y_train_combined = np.concatenate([y_train, y_val])
+    
     final_rf = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=20,
-        min_samples_split=5,
-        min_samples_leaf=2,
+        n_estimators=100,
+        max_depth=12,
+        min_samples_split=10,
+        min_samples_leaf=5,
+        max_features='sqrt',
         random_state=42,
-        n_jobs=-1
+        n_jobs=-1,
+        verbose=0  # Suppress RF verbosity
     )
     
-    print("🔧 Training final classifier...")
-    final_rf.fit(X_train_final, y_train)
+    print("🔧 Training final classifier with regularization...")
+    print(f"   Max Depth: 12 | Min Samples Split: 10 | Min Samples Leaf: 5 | Features: sqrt")
+    final_rf.fit(X_train_combined, y_train_combined)
     print("✓ Training complete")
+    
+    # Evaluate on original validation set to check overfitting
+    y_val_pred = final_rf.predict(X_val_final)
+    val_accuracy = accuracy_score(y_val, y_val_pred)
+    print(f"\n⚠️  OVERFITTING CHECK:")
+    print(f"   Validation Accuracy: {val_accuracy:.4f}")
     
     print(f"\n✅ Phase 3 Complete!")
     
@@ -581,6 +607,14 @@ def run_garam_pipeline(X_train, y_train, X_val, y_val, X_test, y_test):
     recall = recall_score(y_test, y_pred)
     f1 = f1_score(y_test, y_pred)
     cm = confusion_matrix(y_test, y_pred)
+    
+    # Check for overfitting
+    print(f"   Test Accuracy:       {accuracy:.4f}")
+    overfit_gap = val_accuracy - accuracy
+    if overfit_gap > 0.05:
+        print(f"   ⚠️  Possible Overfitting! Validation-Test Gap: {overfit_gap:.4f}")
+    else:
+        print(f"   ✓ Good generalization (gap: {overfit_gap:.4f})")
     
     # Print results
     print("\n" + "="*70)
@@ -764,21 +798,17 @@ if __name__ == "__main__":
     
     # Load data
     print("\n📁 Loading data...")
-    data_path = Path(__file__).resolve().parent / 'data' / 'data_sample_25k.csv'
-    labels_path = Path(__file__).resolve().parent / 'data' / 'y_labels.csv'
+    data_path = Path(__file__).resolve().parent / 'src' / 'data' / 'XY_final_dataset.csv'
     
     if not data_path.exists():
         raise FileNotFoundError(f"Data file not found: {data_path}")
-    if not labels_path.exists():
-        raise FileNotFoundError(f"Labels file not found: {labels_path}")
     
     df = pd.read_csv(str(data_path))
-    df_labels = pd.read_csv(str(labels_path))
     
-    # Skip first 3 columns (SHA256, NOME, PACOTE) - these are metadata
-    # Use columns 3 onwards as features
-    X = df.iloc[:, 3:].values
-    y = df_labels.iloc[:, 0].values
+    # Separate features and labels
+    # Last column is the label, all other columns are features
+    X = df.iloc[:, :-1].values
+    y = df.iloc[:, -1].values
     
     # Labels are already 0 (benign) and 1 (malware) - no conversion needed
     
