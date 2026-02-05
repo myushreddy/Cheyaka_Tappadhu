@@ -1,0 +1,27 @@
+TOP MALWARE INDICATORS (Selected by GA-RAM):
+- Permission::WRITE_SETTINGS
+- Permission::WRITE_EXTERNAL_STORAGE
+- APICall::Landroid/net/wifi/WifiManager$WifiLock.release()
+- APICall::Landroid/net/http/HttpResponseCache.getInstalled()
+- APICall::Landroid/widget/ImageView.getLayoutParams()
+- APICall::Landroid/os/Bundle.getBoolean()
+- APICall::Landroid/content/Intent.hasExtra()
+- APICall::Landroid/content/Intent.createChooser()
+- APICall::Landroid/widget/PopupWindow.setOnDismissListener()
+- APICall::Landroid/widget/ListAdapter.unregisterDataSetObserver()
+- APICall::Landroid/view/ViewGroup.onInitializeAccessibilityEvent()
+- APICall::Landroid/widget/PopupWindow.setBackgroundDrawable()
+- Permission::ACCESS_NETWORK_STATE
+- APICall::Landroid/widget/PopupWindow.setFocusable()
+- APICall::Landroid/view/MenuItem.getGroupId()
+- APICall::Landroid/content/IntentFilter.addDataScheme()
+- APICall::Landroid/view/MenuItem.getIcon()
+- APICall::Landroid/view/Menu.add()
+- APICall::Landroid/content/pm/PackageManager.getActivityIcon()
+- APICall::Landroid/os/IBinder.queryLocalInterface()
+- APICall::Landroid/os/SystemClock.uptimeMillis()
+- APICall::Landroid/view/MotionEvent.obtain()
+- APICall::Landroid/content/ContentValues.put()
+- APICall::Landroid/content/Context.getApplicationInfo()
+- APICall::Landroid/os/Parcel.readFloat()
+- APICall::Landroid/content/Intent.getData()
