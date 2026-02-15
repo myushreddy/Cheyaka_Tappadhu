@@ -36,7 +36,7 @@ X = df.iloc[:, 5:]
 X.to_csv(os.path.join(output_dir, "X_features_clean.csv"), index=False)
 print(f" Step 1: Extracted {X.shape[1]} features.")
 
-# ==========================================
+# ==========================================a
 # 2. GENERATE SUPERVISED LABELS
 # ==========================================
 print(" Step 2: Generating labels...")
@@ -69,3 +69,62 @@ print(" SUCCESS! PROJECT DATA IS READY.")
 print(f" Final Dataset: {xy_final.shape[1]} columns (42 features + 1 label)")
 print(f" Results saved in: {output_dir}")
 print("="*40)
+
+# ==========================================
+# 5. VISUALIZATION (BEFORE & AFTER PLOT)
+# ==========================================
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+print(" Step 5: Generating visualization image...")
+
+# Sort full MI scores
+mi_df_sorted = mi_df.sort_values(by='MI_score', ascending=False).reset_index(drop=True)
+
+# Selection threshold (42nd feature score)
+threshold = mi_df_sorted.iloc[41]['MI_score']
+
+# Split selected vs removed
+selected = mi_df_sorted.iloc[:42]
+removed = mi_df_sorted.iloc[42:]
+
+# Create figure
+plt.figure(figsize=(18, 8))
+# Remove leakage features used to create label
+leakage_features = ['Permission::INTERNET', 'Permission::WAKE_LOCK']
+X_mi = X.drop(columns=leakage_features)
+
+mi = mutual_info_classif(X_mi, y['label'], discrete_features=True, random_state=42)
+mi_df = pd.DataFrame({'Feature': X_mi.columns, 'MI_score': mi}) \
+            .sort_values(by='MI_score', ascending=False)
+
+# ================= LEFT: BEFORE =================
+plt.subplot(1, 2, 1)
+colors = ['green' if i < 42 else 'red' for i in range(len(mi_df_sorted))]
+plt.bar(range(len(mi_df_sorted)), mi_df_sorted['MI_score'], color=colors)
+plt.axhline(y=threshold, color='orange', linestyle='--', label='Selection Threshold')
+plt.title("BEFORE: 95 Actual Features\n(Green = Selected | Red = Noise)")
+plt.xlabel("Features (from data_sample_25k)")
+plt.ylabel("Mutual Information Score")
+plt.legend()
+
+# ================= RIGHT: AFTER =================
+plt.subplot(1, 2, 2)
+sns.barplot(
+    x='MI_score',
+    y='Feature',
+    data=selected,
+    palette='Greens_r'
+)
+plt.title("AFTER: Top 42 Selected Features\n(53 features removed)")
+plt.xlabel("Mutual Information Score")
+plt.ylabel("")
+
+plt.tight_layout()
+
+# Save image
+image_path = os.path.join(output_dir, "Mutual_Information_Feature_Selection.png")
+plt.savefig(image_path, dpi=300, bbox_inches='tight')
+plt.close()
+
+print(f" Visualization saved at: {image_path}")
